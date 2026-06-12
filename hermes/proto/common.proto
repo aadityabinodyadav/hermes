@@ -1,0 +1,31 @@
+syntax = "proto3";
+package hermes;
+option go_package = "github.com/aadityabinodyadav/hermes/proto";
+
+
+message NodeInfo{
+    string id           =1;
+    string address      =2;
+    string region       =3;
+    uint64 started_At   =4;
+}
+
+enum ErrorCode {
+  OK                    = 0;
+  NOT_LEADER            = 1;  
+  NO_LEADER             = 2;  
+  KEY_NOT_FOUND         = 3;  
+  TRANSACTION_CONFLICT  = 4;  
+  CLUSTER_NOT_READY     = 5; 
+  STALE_READ            = 6;  
+  TIMEOUT               = 7;  
+  STORAGE_ERROR         = 8;  
+  INVALID_REQUEST       = 9;  
+}
+
+enum ConsistencyLevel {
+    EVENTUAL            = 0;
+    STRONG              = 1;
+    SESSION             = 2;
+    BOUNDED_STALENESS   = 3;
+}

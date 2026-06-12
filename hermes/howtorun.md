@@ -13,3 +13,6 @@ go test -bench=. -benchmem ./pkg/os_fundamentals/...
 
 # Check for escape analysis (see what goes to heap)
 go build -gcflags='-m -m' ./pkg/os_fundamentals/ 2>&1 | head -50
+
+go build -gcflags="-m -m" ./pkg/os_fundamentals 2>&1 |
+Select-String "escape"
