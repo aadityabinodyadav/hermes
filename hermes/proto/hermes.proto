@@ -1,0 +1,159 @@
+
+syntax = "proto3";
+
+package hermes;
+option go_package = "github.com/aadityabinodyadav/hermes/proto";
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+
+message PutRequest {
+  string key            = 1;
+  bytes  value          = 2;
+  int64  ttl_seconds    = 3; 
+  
+
+  int64  expected_version = 4;
+  
+  uint64 transaction_id  = 5;
+}
+
+message PutResponse {
+  ErrorCode error   = 1;
+  string error_msg  = 2;
+  int64  version    = 3; 
+  string leader_hint = 4; 
+}
+
+message GetRequest {
+  string key              = 1;
+  ConsistencyLevel level  = 2;
+  
+  int64 max_staleness_ms  = 3;
+  
+  int64 read_timestamp    = 4; 
+  
+  uint64 transaction_id   = 5;
+}
+
+message GetResponse {
+  ErrorCode error   = 1;
+  string error_msg  = 2;
+  bytes  value      = 3;
+  int64  version    = 4;   
+  int64  timestamp  = 5;   
+  bool   found      = 6;
+  string leader_hint = 7;
+}
+
+message DeleteRequest {
+  string key          = 1;
+  int64  expected_version = 2; 
+  uint64 transaction_id  = 3;
+}
+
+message DeleteResponse {
+  ErrorCode error   = 1;
+  string error_msg  = 2;
+  string leader_hint = 3;
+}
+
+message ScanRequest {
+  string start_key        = 1; 
+  string end_key          = 2; 
+  int32  limit            = 3; 
+  string cursor           = 4; 
+  ConsistencyLevel level  = 5;
+  bool   keys_only        = 6; 
+}
+
+message ScanResponse {
+  ErrorCode error   = 1;
+  string error_msg  = 2;
+  repeated KeyValue items   = 3;
+  string next_cursor        = 4; 
+  bool   has_more           = 5;
+}
+
+message KeyValue {
+  string key      = 1;
+  bytes  value    = 2;
+  int64  version  = 3;
+  int64  timestamp = 4;
+}
+
+
+message BeginTransactionRequest {
+  
+  enum IsolationLevel {
+    SNAPSHOT_ISOLATION    = 0; 
+    SERIALIZABLE          = 1; 
+    READ_COMMITTED        = 2;
+  }
+  IsolationLevel isolation = 1;
+  int64 timeout_ms         = 2;
+}
+
+message BeginTransactionResponse {
+  ErrorCode error        = 1;
+  string error_msg       = 2;
+  uint64 transaction_id  = 3;
+  int64  read_timestamp  = 4; 
+}
+
+message CommitTransactionRequest {
+  uint64 transaction_id = 1;
+}
+
+message CommitTransactionResponse {
+  ErrorCode error        = 1;
+  string error_msg       = 2;
+  int64  commit_timestamp = 3;
+}
+
+message AbortTransactionRequest {
+  uint64 transaction_id = 1;
+}
+
+message AbortTransactionResponse {
+  ErrorCode error  = 1;
+  string error_msg = 2;
+}
+
+message WatchRequest {
+  string key_prefix   = 1; 
+  int64  start_version = 2; 
+}
+
+message WatchEvent {
+  enum EventType {
+    PUT    = 0;
+    DELETE = 1;
+  }
+  EventType type  = 1;
+  string key      = 2;
+  bytes  value    = 3;
+  int64  version  = 4;
+  int64  timestamp = 5;
+}
+
+
+service HermesKV {
+  rpc Put(PutRequest)       returns (PutResponse);
+  rpc Get(GetRequest)       returns (GetResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  
+  rpc Scan(ScanRequest)     returns (ScanResponse);
+  
+  
+  rpc BeginTransaction(BeginTransactionRequest)   returns (BeginTransactionResponse);
+  rpc CommitTransaction(CommitTransactionRequest) returns (CommitTransactionResponse);
+  rpc AbortTransaction(AbortTransactionRequest)   returns (AbortTransactionResponse);
+  
+  
+  rpc Watch(WatchRequest) returns (stream WatchEvent);
+  
+  
+  rpc BatchOps(stream PutRequest) returns (stream PutResponse);
+}

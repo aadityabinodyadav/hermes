@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package hermes;
+option go_package = "github.com/aadityabinodyadav/hermes/proto";
+
+import "common.proto";
+
+
+enum MemberState {
+  ALIVE     = 0;
+  SUSPECTED = 1; 
+  DEAD      = 2; 
+  LEFT      = 3; 
+}
+
+message Member {
+  NodeInfo    info        = 1;
+  MemberState state       = 2;
+  uint64      incarnation = 3; 
+  int64       last_seen   = 4; 
+}
+
+
+message PingRequest {
+  string   sender_id          = 1;
+  uint64   sequence_number    = 2;
+  
+
+  repeated Member gossip_updates = 3;
+}
+
+message PingResponse {
+  string sender_id       = 1;
+  uint64 sequence_number = 2;
+  repeated Member gossip_updates = 3;
+}
+
+
+message PingReqRequest {
+  string sender_id   = 1;
+  string target_id   = 2;
+  uint64 sequence_number = 3;
+}
+
+message PingReqResponse {
+  bool   reached      = 1; 
+  uint64 sequence_number = 2;
+  repeated Member gossip_updates = 3;
+}
+
+message JoinRequest {
+  NodeInfo node_info = 1;
+}
+
+message JoinResponse {
+  bool             accepted    = 1;
+  string           error       = 2;
+  repeated Member  members     = 3; 
+  string           cluster_id  = 4;
+}
+
+message LeaveRequest {
+  string node_id = 1;
+  string reason  = 2;
+}
+
+message LeaveResponse {
+  bool success = 1;
+}
+
+message ClusterStateRequest {
+  string requester_id = 1;
+}
+
+message ClusterStateResponse {
+  repeated Member members  = 1;
+  string          cluster_id = 2;
+  uint64          epoch    = 3;
+}
+
+service MembershipService {
+  rpc Ping(PingRequest)               returns (PingResponse);
+  rpc PingReq(PingReqRequest)         returns (PingReqResponse);
+  rpc Join(JoinRequest)               returns (JoinResponse);
+  rpc Leave(LeaveRequest)             returns (LeaveResponse);
+  rpc GetClusterState(ClusterStateRequest) returns (ClusterStateResponse);
+  
+  rpc StreamMembershipEvents(ClusterStateRequest) returns (stream Member);
+}
