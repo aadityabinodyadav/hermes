@@ -6,6 +6,7 @@ import (
 
 	"github.com/aadityabinodyadav/hermes/pkg/clock"
 	"github.com/aadityabinodyadav/hermes/pkg/os_fundamentals"
+	"github.com/aadityabinodyadav/hermes/pkg/storage"
 	"github.com/aadityabinodyadav/hermes/pkg/transport"
 )
 
@@ -23,6 +24,8 @@ func main() {
 		transport.RunTransportDemo()
 	case "clocks":
 		clock.RunClockDemo()
+	case "storage":
+		storage.RunStorageDemo()
 	default:
 		fmt.Printf("Unknown phase: %s\n", os.Args[1])
 		printUsage()
