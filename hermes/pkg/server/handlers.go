@@ -11,7 +11,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/aadityabinodyadav/hermes/pkg/membership"
+	"github.com/aadityabinodyadav/hermes/pkg/raft"
 	pb "github.com/aadityabinodyadav/hermes/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -147,19 +150,99 @@ type raftHandler struct {
 }
 
 func (h *raftHandler) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
-	fmt.Printf("[%s] received AppendEntries from %s\n", h.node.config.NodeID, req.LeaderId)
-	return &pb.AppendEntriesResponse{
-		Term:    req.Term,
-		Success: true,
-	}, nil
+	entries := make([]raft.LogEntry, len(req.Entries))
+	for i, e := range req.Entries {
+		entries[i] = raft.LogEntry{
+			Index: e.Index,
+			Term:  e.Term,
+			Type:  raft.EntryType(e.Type),
+			Data:  e.Data,
+		}
+	}
+
+	msg := raft.Message{
+		Type:        raft.MsgAppend,
+		From:        req.LeaderId,
+		To:          h.node.config.NodeID,
+		Term:        req.Term,
+		LogIndex:    req.PrevLogIndex,
+		LogTerm:     req.PrevLogTerm,
+		Entries:     entries,
+		CommitIndex: req.LeaderCommit,
+	}
+
+	ch := make(chan raft.Message, 1)
+	
+	if h.node.raftTrans != nil {
+		h.node.raftTrans.mu.Lock()
+		h.node.raftTrans.pending[req.LeaderId] = ch
+		h.node.raftTrans.mu.Unlock()
+	} else {
+		return nil, fmt.Errorf("raft transport not initialized")
+	}
+
+	// Step the message into the Raft state machine
+	if err := h.node.raftNode.Step(ctx, msg); err != nil {
+		return nil, err
+	}
+
+	// Wait for the asynchronous response
+	select {
+	case respMsg := <-ch:
+		return &pb.AppendEntriesResponse{
+			Term:          respMsg.Term,
+			Success:       respMsg.Success,
+			ConflictIndex: respMsg.ConflictIndex,
+			ConflictTerm:  respMsg.ConflictTerm,
+			FollowerId:    h.node.config.NodeID,
+		}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (h *raftHandler) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
-	fmt.Printf("[%s] received RequestVote from %s\n", h.node.config.NodeID, req.CandidateId)
-	return &pb.RequestVoteResponse{
-		Term:        req.Term,
-		VoteGranted: false,
-	}, nil
+	msgType := raft.MsgVote
+	if req.PreVote {
+		msgType = raft.MsgPreVote
+	}
+
+	msg := raft.Message{
+		Type:     msgType,
+		From:     req.CandidateId,
+		To:       h.node.config.NodeID,
+		Term:     req.Term,
+		LogIndex: req.LastLogIndex,
+		LogTerm:  req.LastLogTerm,
+		PreVote:  req.PreVote,
+	}
+
+	ch := make(chan raft.Message, 1)
+	
+	if h.node.raftTrans != nil {
+		h.node.raftTrans.mu.Lock()
+		h.node.raftTrans.pending[req.CandidateId] = ch
+		h.node.raftTrans.mu.Unlock()
+	} else {
+		return nil, fmt.Errorf("raft transport not initialized")
+	}
+
+	// Step the message into the Raft state machine
+	if err := h.node.raftNode.Step(ctx, msg); err != nil {
+		return nil, err
+	}
+
+	// Wait for the asynchronous response
+	select {
+	case respMsg := <-ch:
+		return &pb.RequestVoteResponse{
+			Term:        respMsg.Term,
+			VoteGranted: respMsg.VoteGranted,
+			VoterId:     h.node.config.NodeID,
+		}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (h *raftHandler) TimeoutNow(ctx context.Context, req *pb.TimeoutNowRequest) (*pb.TimeoutNowResponse, error) {
@@ -183,14 +266,64 @@ type membershipHandler struct {
 }
 
 func (h *membershipHandler) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
+	if h.node.swimTransport != nil {
+		h.node.swimTransport.InjectIncoming(membership.SWIMMessage{
+			Type:    membership.MsgPing,
+			From:    req.SenderId,
+			To:      h.node.config.NodeID,
+			SeqNum:  req.SequenceNumber,
+			Updates: membership.DecodeUpdates(req.GossipUpdates),
+		})
+	}
+	
+	var recent []*pb.Member
+	if h.node.memberMgr != nil {
+		recentUpdates := h.node.memberMgr.RecentUpdates(8) // 8 is GossipFanout
+		recent = membership.EncodeUpdates(recentUpdates)
+	}
+
 	return &pb.PingResponse{
-		SenderId: h.node.config.NodeID,
+		SenderId:       h.node.config.NodeID,
+		SequenceNumber: req.SequenceNumber,
+		GossipUpdates:  recent,
 	}, nil
 }
 
 func (h *membershipHandler) PingReq(ctx context.Context, req *pb.PingReqRequest) (*pb.PingReqResponse, error) {
+	if h.node.swimTransport != nil {
+		h.node.swimTransport.InjectIncoming(membership.SWIMMessage{
+			Type:   membership.MsgPingReq,
+			From:   req.SenderId,
+			To:     h.node.config.NodeID,
+			Target: req.TargetId,
+			SeqNum: req.SequenceNumber,
+		})
+	}
+	
+	var reached bool = false
+	if h.node.swimTransport != nil {
+		ctx2, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		
+		err := h.node.swimTransport.Send(ctx2, req.TargetId, membership.SWIMMessage{
+			Type:   membership.MsgPing,
+			From:   h.node.config.NodeID,
+			To:     req.TargetId,
+			SeqNum: req.SequenceNumber + 1000, // random
+		})
+		reached = (err == nil)
+	}
+
+	var recent []*pb.Member
+	if h.node.memberMgr != nil {
+		recentUpdates := h.node.memberMgr.RecentUpdates(8)
+		recent = membership.EncodeUpdates(recentUpdates)
+	}
+
 	return &pb.PingReqResponse{
-		Reached: true,
+		Reached:        reached,
+		SequenceNumber: req.SequenceNumber,
+		GossipUpdates:  recent,
 	}, nil
 }
 

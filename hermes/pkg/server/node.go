@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/aadityabinodyadav/hermes/pkg/chaos"
 	"github.com/aadityabinodyadav/hermes/pkg/clock"
+	pb "github.com/aadityabinodyadav/hermes/proto"
 	"github.com/aadityabinodyadav/hermes/pkg/consistency"
 	"github.com/aadityabinodyadav/hermes/pkg/membership"
 	"github.com/aadityabinodyadav/hermes/pkg/observability"
@@ -74,9 +76,11 @@ type HermesNode struct {
 	hlc       *clock.HLC
 	engine    *storage.Engine
 	raftNode  *raft.RaftNode
+	raftTrans *hermesRaftTransport
 	shardMap  *partition.ShardMap
 	router    *partition.Router
-	memberMgr *membership.MembershipManager
+	memberMgr      *membership.MembershipManager
+	swimTransport  *membership.GrpcSWIMTransport
 
 	// Consistency
 	leaderLease *consistency.LeaderLease
@@ -257,8 +261,17 @@ func (n *HermesNode) startMembership() error {
 		n.config.NodeID, n.grpcServer.Addr(),
 	)
 
-	swimTransport := membership.NewMemSWIMTransport(n.config.NodeID)
-	n.memberMgr = membership.NewMembershipManager(swimCfg, swimTransport)
+	n.swimTransport = membership.NewGrpcSWIMTransport(n.config.NodeID, func(id string) string {
+		// Use memberMgr to resolve node IDs to addresses if needed
+		if n.memberMgr != nil {
+			if m, ok := n.memberMgr.Get(id); ok {
+				return m.Address
+			}
+		}
+		return id // Fallback to id as address (works for seed nodes)
+	})
+
+	n.memberMgr = membership.NewMembershipManager(swimCfg, n.swimTransport)
 
 	go n.handleMembershipEvents()
 
@@ -288,9 +301,15 @@ func (n *HermesNode) startRaft() error {
 	raftCfg.ElectionTick = int(n.config.ElectionTimeout / (10 * time.Millisecond))
 
 	sm := &hermesStateMachine{engine: n.engine, logger: n.logger}
-	rt := &hermesRaftTransport{pool: n.connPool}
+	rt := &hermesRaftTransport{
+		pool:    n.connPool,
+		nodeID:  n.config.NodeID,
+		pending: make(map[string]chan raft.Message),
+	}
+	n.raftTrans = rt
 
 	n.raftNode = raft.NewRaftNode(raftCfg, sm, n.hlc, rt)
+	rt.raftNode = n.raftNode
 	n.raftNode.Start()
 
 	n.health.SetCheck("raft", observability.HealthStarting,
@@ -814,7 +833,12 @@ func (sm *hermesStateMachine) Restore(data []byte) error {
 
 // hermesRaftTransport sends Raft messages via gRPC connection pool
 type hermesRaftTransport struct {
-	pool *transport.ConnectionPool
+	pool     *transport.ConnectionPool
+	raftNode *raft.RaftNode
+	nodeID   string
+
+	mu      sync.Mutex
+	pending map[string]chan raft.Message
 }
 
 func (t *hermesRaftTransport) Send(msgs []raft.Message) {
@@ -824,12 +848,92 @@ func (t *hermesRaftTransport) Send(msgs []raft.Message) {
 			continue
 		}
 
-		// In production: convert raft.Message to proto and send via
-		// peer.RaftClient.AppendEntries() or peer.RaftClient.RequestVote()
-		// Simplified here to show the pattern
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		_ = ctx
-		cancel()
+		// Context is created inside the goroutine to prevent immediate cancellation
+		switch msg.Type {
+		case raft.MsgAppend, raft.MsgHeartbeat:
+			entries := make([]*pb.LogEntry, len(msg.Entries))
+			for i, e := range msg.Entries {
+				entries[i] = &pb.LogEntry{
+					Index: e.Index,
+					Term:  e.Term,
+					Type:  pb.LogEntry_EntryType(e.Type), // Assuming direct mapping
+					Data:  e.Data,
+				}
+			}
+
+			req := &pb.AppendEntriesRequest{
+				Term:          msg.Term,
+				LeaderId:      msg.From,
+				PrevLogIndex:  msg.LogIndex,
+				PrevLogTerm:   msg.LogTerm,
+				Entries:       entries,
+				LeaderCommit:  msg.CommitIndex,
+			}
+
+			go func(m raft.Message) {
+				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				defer cancel()
+				resp, err := peer.RaftClient.AppendEntries(ctx, req)
+				if err != nil {
+					fmt.Printf("[RaftTransport] AppendEntries to %s failed: %v\n", m.To, err)
+					return
+				}
+				if t.raftNode != nil {
+					t.raftNode.Step(context.Background(), raft.Message{
+						Type:          raft.MsgAppendRsp,
+						To:            m.From,
+						From:          m.To,
+						Term:          resp.Term,
+						Success:       resp.Success,
+						ConflictIndex: resp.ConflictIndex,
+						ConflictTerm:  resp.ConflictTerm,
+					})
+				}
+			}(msg)
+
+		case raft.MsgVote, raft.MsgPreVote:
+			req := &pb.RequestVoteRequest{
+				Term:         msg.Term,
+				CandidateId:  msg.From,
+				LastLogIndex: msg.LogIndex,
+				LastLogTerm:  msg.LogTerm,
+				PreVote:      msg.PreVote,
+			}
+
+			go func(m raft.Message) {
+				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				defer cancel()
+				resp, err := peer.RaftClient.RequestVote(ctx, req)
+				if err != nil {
+					fmt.Printf("[RaftTransport] RequestVote to %s failed: %v\n", m.To, err)
+					return
+				}
+				if t.raftNode != nil {
+					respType := raft.MsgVoteRsp
+					if m.PreVote {
+						respType = raft.MsgPreVoteRsp
+					}
+					t.raftNode.Step(context.Background(), raft.Message{
+						Type:        respType,
+						To:          m.From,
+						From:        m.To,
+						Term:        resp.Term,
+						VoteGranted: resp.VoteGranted,
+					})
+				}
+			}(msg)
+
+		case raft.MsgAppendRsp, raft.MsgVoteRsp, raft.MsgPreVoteRsp:
+			t.mu.Lock()
+			ch, ok := t.pending[msg.To]
+			if ok {
+				delete(t.pending, msg.To)
+			}
+			t.mu.Unlock()
+			if ok {
+				ch <- msg
+			}
+		}
 	}
 }
 

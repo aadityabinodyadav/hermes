@@ -167,6 +167,16 @@ func (m *MembershipManager) IsAlive(nodeID string) bool {
 	return member.State == StateAlive
 }
 
+// Get returns the member information by node ID
+func (m *MembershipManager) Get(nodeID string) (*Member, bool) {
+	return m.memberList.Get(nodeID)
+}
+
+// RecentUpdates returns the recent gossip updates
+func (m *MembershipManager) RecentUpdates(n int) []GossipUpdate {
+	return m.memberList.RecentUpdates(n)
+}
+
 // emit sends a cluster event to subscribers
 func (m *MembershipManager) emit(event ClusterEvent) {
 	select {

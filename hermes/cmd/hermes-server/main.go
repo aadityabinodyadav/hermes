@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/aadityabinodyadav/hermes/pkg/advanced"
@@ -94,9 +95,15 @@ func runServer() {
 	nodeID := getEnv("HERMES_NODE_ID", "hermes-0")
 	listenAddr := getEnv("HERMES_LISTEN_ADDR", "0.0.0.0:7001") // gRPC
 	httpAddr := getEnv("HERMES_HTTP_ADDR", "0.0.0.0:7000")     // HTTP
+	metricsAddr := getEnv("HERMES_METRICS_ADDR", ":9090")      // Metrics
 	dataDir := getEnv("HERMES_DATA_DIR", "/data")
+	seedNodesStr := getEnv("HERMES_SEED_NODES", "")
 
 	config := server.DefaultConfig(nodeID, listenAddr, dataDir)
+	config.MetricsAddr = metricsAddr
+	if seedNodesStr != "" {
+		config.SeedNodes = strings.Split(seedNodesStr, ",")
+	}
 
 	node, err := server.NewHermesNode(config)
 	if err != nil {
