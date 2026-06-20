@@ -1,0 +1,36 @@
+# deploy/kubernetes/services.yaml
+
+# Headless service: DNS for each pod individually
+# hermes-0.hermes.hermes.svc.cluster.local → hermes-0 pod IP
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes
+  namespace: hermes
+spec:
+  clusterIP: None  # headless!
+  selector:
+    app: hermes
+  ports:
+  - name: grpc
+    port: 7000
+  - name: metrics
+    port: 9090
+
+---
+# Client-facing service: routes to leader
+# Uses a proxy/sidecar that knows who the leader is
+# Or: clients handle routing themselves (Hermes client library)
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-client
+  namespace: hermes
+spec:
+  type: ClusterIP
+  selector:
+    app: hermes
+  ports:
+  - name: grpc
+    port: 7000
+    targetPort: 7000

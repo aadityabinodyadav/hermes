@@ -147,6 +147,20 @@ func (n *RaftNode) run() {
 				From:    n.config.NodeID,
 				Entries: prop.entries,
 			})
+			if err == nil {
+				ready := n.raft.TakeReady()
+				if !ready.IsEmpty() {
+					n.processReady(ready)
+
+					if n.raft.lead != prevLead {
+						prevLead = n.raft.lead
+						select {
+						case n.leaderChangeCh <- n.raft.lead:
+						default:
+						}
+					}
+				}
+			}
 			prop.result <- err
 
 		case msg := <-n.stepCh:
@@ -275,6 +289,16 @@ func (n *RaftNode) Status() Status {
 
 func (n *RaftNode) LeaderChanges() <-chan string {
 	return n.leaderChangeCh
+}
+
+// Tick sends a tick signal to the Raft state machine.
+// This is used by external callers (e.g. ReadIndexTracker) to trigger
+// heartbeats or election timeouts directly.
+func (n *RaftNode) Tick() {
+	select {
+	case n.tickCh <- struct{}{}:
+	default:
+	}
 }
 
 func (n *RaftNode) Stop() {

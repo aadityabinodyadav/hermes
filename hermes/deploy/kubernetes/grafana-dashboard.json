@@ -1,0 +1,37 @@
+{
+    "__comment": "Grafana Dashboard for Hermes Distributed KV Store. In production: use Grafana operator or ConfigMap.",
+    "title": "Hermes Cluster Dashboard",
+    "uid": "hermes-cluster",
+    "panels": [
+        {
+            "id": 1,
+            "title": "Cluster Health Overview",
+            "description": "Is there a leader? How many nodes alive? Current term.",
+            "type": "stat"
+        },
+        {
+            "id": 2,
+            "title": "Request Latency",
+            "description": "P50, P95, P99 over time. Rate of requests. Error rate.",
+            "type": "timeseries"
+        },
+        {
+            "id": 3,
+            "title": "Raft Internals",
+            "description": "Commit rate (ops/sec). Replication lag per follower. Leader change events (vertical lines).",
+            "type": "timeseries"
+        },
+        {
+            "id": 4,
+            "title": "Storage Performance",
+            "description": "WAL write/fsync latency. MemTable size. SSTable count per level. Bloom filter hit rate.",
+            "type": "timeseries"
+        },
+        {
+            "id": 5,
+            "title": "System Resources",
+            "description": "CPU per node. Memory per node. Goroutine count (leak detection). GC pause duration.",
+            "type": "timeseries"
+        }
+    ]
+}

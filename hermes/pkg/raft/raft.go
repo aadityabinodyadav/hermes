@@ -256,6 +256,12 @@ func (r *Raft) becomeLeader() {
 	r.heartbeatElapsed = 0
 
 	lastIndex := r.log.LastIndex()
+	r.progress[r.id] = &Progress{
+		NextIndex:    lastIndex + 1,
+		MatchIndex:   lastIndex,
+		State:        ProgressReplicate,
+		RecentActive: true,
+	}
 	for _, peer := range r.config.Peers {
 		r.progress[peer] = &Progress{
 			NextIndex:  lastIndex + 1,
@@ -281,8 +287,7 @@ func (r *Raft) tickElection() {
 
 	if r.electionElapsed >= r.electionTimeout {
 		r.electionElapsed = 0
-
-		r.Step(Message{From: r.id, Type: MsgVote})
+		r.campaign()
 	}
 }
 
@@ -809,7 +814,7 @@ func (r *Raft) TakeReady() Ready {
 	}
 
 	if stats.CommitIndex > stats.AppliedIndex {
-		ready.CommittedEntries = r.log.CommitTo(stats.CommitIndex)
+		ready.CommittedEntries = r.log.Entries(stats.AppliedIndex+1, stats.CommitIndex+1)
 	}
 
 	ready.Messages = r.TakeMessages()

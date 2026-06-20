@@ -1,51 +1,6 @@
 package bloom
 
-/*
- Bloom Filter: "Is this key DEFINITELY NOT in this SSTable?"
 
- A Bloom filter is a space-efficient probabilistic data structure.
- It can tell you:
-   - "DEFINITELY NOT in set" (no false negatives)
-   - "PROBABLY in set" (false positives possible)
-
- For Hermes:
-   - Before reading an SSTable from disk: ask Bloom filter
-   - If filter says "NOT IN": skip SSTable entirely (save disk I/O!)
-   - If filter says "MAYBE IN": read SSTable and check
-
- How it works:
-   - An array of M bits (all start as 0)
-   - K hash functions
-   - Add(key): set bits at h1(key), h2(key), ..., hk(key)
-   - Contains(key): check bits at all hash positions
-     if ANY bit is 0 → DEFINITELY NOT in set
-     if ALL bits are 1 → PROBABLY in set (maybe false positive)
-
-   ┌─────────────────────────────────────────┐
-   │  Bit array: [1,0,1,1,0,1,0,0,1,0,1,0]  │
-   │                                          │
-   │  Add("alice"): h1=2, h2=5, h3=8        │
-   │  Set bits 2,5,8 → [1,0,1,1,0,1,0,0,1,..]│
-   │                                          │
-   │  Add("bob"):   h1=0, h2=3, h3=10       │
-   │  Set bits 0,3,10 → [1,0,1,1,0,1,0,0,1,0,1,0]│
-   │                                          │
-   │  Contains("charlie"): h1=4, h2=7, h3=2  │
-   │  Bit 4 = 0 → DEFINITELY NOT IN SET ✅   │
-   │  No disk read needed!                    │
-   └─────────────────────────────────────────┘
-
- False positive rate: p = (1 - e^(-kn/m))^k
- where n=items, m=bits, k=hash functions
-
- Optimal k = (m/n) * ln(2)
-
- For p=1% (1 false positive per 100 checks):
-   m/n ≈ 9.6 bits per item
-   k ≈ 6.7 hash functions (round to 7)
-
- RocksDB default: ~10 bits per key, ~6 hash functions
-*/
 import (
 	"encoding/binary"
 	"fmt"

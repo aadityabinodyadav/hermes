@@ -1,25 +1,6 @@
 package partition
 
-/*
- ShardMap is the global routing table for Hermes
 
- It answers: "Given a key, which Raft group handles it?"
-
- ShardMap is itself replicated via a special "meta-raft" group
- (like CockroachDB's meta ranges, or TiKV's PD component)
-
- Structure:
-   ShardMap = sorted list of ShardDescriptor
-   Each descriptor covers [StartKey, EndKey)
-
-   ┌─────────────────────────────────────────────────────┐
-   │ ShardID:0  StartKey:""    EndKey:"key:m"  Group:rg0 │
-   │ ShardID:1  StartKey:"key:m" EndKey:"key:z" Group:rg1│
-   │ ShardID:2  StartKey:"key:z" EndKey:""     Group:rg2 │
-   └─────────────────────────────────────────────────────┘
-   (EndKey="" means infinity)
-
-*/
 
 import (
 	"fmt"

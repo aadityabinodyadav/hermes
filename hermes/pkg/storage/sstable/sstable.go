@@ -1,51 +1,6 @@
 package sstable
 
-/*
- SSTable (Sorted String Table) — the immutable on-disk file
 
- Structure of an SSTable file:
-
-  ┌────────────────────────────────────────────────────────┐
-  │  DATA BLOCKS                                            │
-  │  ┌──────────────────┐                                  │
-  │  │ Block 0          │ ← 4KB of sorted key-value pairs  │
-  │  │ [key1,val1]      │                                  │
-  │  │ [key2,val2]      │                                  │
-  │  │ [key3,val3]      │                                  │
-  │  │ CRC32            │ ← block-level checksum           │
-  │  └──────────────────┘                                  │
-  │  ┌──────────────────┐                                  │
-  │  │ Block 1          │                                  │
-  │  │ [key4,val4]      │                                  │
-  │  │ ...              │                                  │
-  │  └──────────────────┘                                  │
-  │  ...                                                    │
-  ├────────────────────────────────────────────────────────┤
-  │  INDEX BLOCK                                            │
-  │  [key1 → block0_offset]                               │
-  │  [key4 → block1_offset]                               │
-  │  [keyN → blockN_offset]                               │
-  │  (first key of each block → block offset)             │
-  ├────────────────────────────────────────────────────────┤
-  │  BLOOM FILTER                                           │
-  │  [serialized bloom filter bytes]                       │
-  │  (all keys in this SSTable)                           │
-  ├────────────────────────────────────────────────────────┤
-  │  FOOTER (fixed size, always at end of file)            │
-  │  [index_offset:8][index_len:8]                        │
-  │  [bloom_offset:8][bloom_len:8]                        │
-  │  [min_key_len:4][min_key:N]                           │
-  │  [max_key_len:4][max_key:N]                           │
-  │  [entry_count:8]                                      │
-  │  [magic:8] ← 0xHERMESDB for validation               │
-  └────────────────────────────────────────────────────────┘
-
- WHY IMMUTABLE?
-   - Once written, never modified → no locking needed for reads!
-   - Multiple readers at full speed (no contention)
-   - Corruption detection: if file changes, it's wrong
-   - Simple compaction: just merge and create new file
-*/
 import (
 	"bufio"
 	"encoding/binary"

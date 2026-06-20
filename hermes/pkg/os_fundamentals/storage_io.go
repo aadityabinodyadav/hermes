@@ -6,28 +6,7 @@ import (
 	"time"
 )
 
-/* =====================================================
-   STORAGE I/O FUNDAMENTALS
 
-   Hierarchy from fastest to slowest:
-
-   CPU Registers   ~0.3ns    ~KB
-   L1 Cache        ~1ns      32-64KB   per core
-   L2 Cache        ~4ns      256KB     per core
-   L3 Cache        ~10ns     4-32MB    shared
-   RAM (DRAM)      ~100ns    GB-TB
-   NVMe SSD        ~100μs    TB        (sequential), ~20μs (4KB random)
-   SATA SSD        ~500μs    TB
-   HDD             ~10ms     TB        (random seek)
-   Network (LAN)   ~0.5ms   ∞
-   Network (WAN)   ~100ms   ∞
-
-   Where each Hermes layer lives:
-     WAL writes  → disk (must fsync before ACK)
-     MemTable    → RAM  (fast reads/writes)
-     SSTable     → disk (slow, but OS page-cached after first read)
-     Replication → network
-   ===================================================== */
 
 func StorageIOFundamentals() {
 	fmt.Println("=== STORAGE & I/O FUNDAMENTALS ===")
@@ -37,9 +16,7 @@ func StorageIOFundamentals() {
 	demonstratePageCache()
 }
 
-/* =====================================================
-   HELPERS
-   ===================================================== */
+
 
 func tempFile(pattern string) (*os.File, func()) {
 	f, _ := os.CreateTemp("", pattern)
@@ -58,9 +35,7 @@ func throughputGBs(bytes int, d time.Duration) float64 {
 	return throughputMBs(bytes, d) / 1024
 }
 
-/* =====================================================
-   RAM vs DISK
-   ===================================================== */
+
 
 func demonstrateIOHierarchy() {
 	fmt.Println("--- RAM vs Disk (measured on this machine) ---")
@@ -71,7 +46,7 @@ func demonstrateIOHierarchy() {
 }
 
 func measureRAM() {
-	const size = 100 * 1024 * 1024 /* 100MB */
+	const size = 100 * 1024 * 1024 
 	data := make([]byte, size)
 
 	start := time.Now()
@@ -98,7 +73,7 @@ func measureDiskSequential() {
 
 	const (
 		blockSize = 4096
-		ops       = 1000 /* 4MB total */
+		ops       = 1000 
 	)
 	block := make([]byte, blockSize)
 
@@ -132,11 +107,7 @@ func measureDiskWithFsync() {
 	fmt.Println("  OPTIMIZATION: group commit — one fsync covers many WAL entries.")
 }
 
-/* =====================================================
-   SEQUENTIAL VS RANDOM WRITES
-   LSM-Tree's entire point is converting random writes
-   into sequential ones.
-   ===================================================== */
+
 
 func demonstrateWritePatterns() {
 	fmt.Println("--- Sequential vs Random Writes ---")
@@ -148,7 +119,7 @@ func demonstrateWritePatterns() {
 	)
 	block := make([]byte, blockSize)
 
-	/* Sequential: what LSM-Tree does when flushing MemTable to SSTable */
+	
 	seqFile, seqCleanup := tempFile("hermes-seq-*")
 	defer seqCleanup()
 
@@ -158,16 +129,16 @@ func demonstrateWritePatterns() {
 	}
 	seqTime := time.Since(start)
 
-	/* Random: what a B-Tree does on every write (conceptually) */
+	
 	randFile, randCleanup := tempFile("hermes-rand-*")
 	defer randCleanup()
 
-	randFile.Write(make([]byte, ops*blockSize)) /* pre-allocate */
+	randFile.Write(make([]byte, ops*blockSize)) 
 	randFile.Sync()
 
 	start = time.Now()
 	for i := 0; i < ops; i++ {
-		offset := int64((i * 17 % ops) * blockSize) /* pseudo-random positions */
+		offset := int64((i * 17 % ops) * blockSize) 
 		randFile.WriteAt(block, offset)
 	}
 	randTime := time.Since(start)
@@ -182,9 +153,7 @@ func demonstrateWritePatterns() {
 	fmt.Println("  Tradeoff: reads check multiple SSTables (read amplification)")
 }
 
-/* =====================================================
-   FSYNC COST AND GROUP COMMIT
-   ===================================================== */
+
 
 func demonstrateFsyncCost() {
 	fmt.Println("--- fsync() and Group Commit ---")
@@ -196,7 +165,7 @@ func demonstrateFsyncCost() {
 
 	data := make([]byte, 1024)
 
-	/* Single fsync */
+	
 	f.Write(data)
 	start := time.Now()
 	f.Sync()
@@ -205,7 +174,7 @@ func demonstrateFsyncCost() {
 	fmt.Printf("Single fsync:          %v\n", singleFsync)
 	fmt.Printf("Max throughput:        %.0f writes/sec (one fsync per write)\n\n", 1.0/singleFsync.Seconds())
 
-	/* Group commit: N writes, one fsync */
+	
 	const groupSize = 100
 	start = time.Now()
 	for i := 0; i < groupSize; i++ {
@@ -222,20 +191,16 @@ func demonstrateFsyncCost() {
 	fmt.Println("  Result: 10-100x better throughput vs per-write fsync.")
 }
 
-/* =====================================================
-   OS PAGE CACHE
-   The OS caches disk pages in RAM automatically.
-   Hot SSTables effectively live in RAM after first read.
-   ===================================================== */
+
 
 func demonstratePageCache() {
 	fmt.Println("--- OS Page Cache ---")
 	fmt.Println("The OS caches disk pages in RAM automatically.")
 	fmt.Println("First read hits disk; subsequent reads hit RAM.")
 
-	const size = 10 * 1024 * 1024 /* 10MB */
+	const size = 10 * 1024 * 1024 
 
-	/* Write file and flush to disk */
+	
 	f, cleanup := tempFile("hermes-pagecache-*")
 	payload := make([]byte, size)
 	for i := range payload {
@@ -256,8 +221,8 @@ func demonstratePageCache() {
 	}
 	defer os.Remove(name)
 
-	coldRead := readFile() /* first read: likely a cache miss */
-	warmRead := readFile() /* second read: page cache hit */
+	coldRead := readFile() 
+	warmRead := readFile() 
 
 	fmt.Printf("Cold read (10MB, first):  %v\n", coldRead)
 	fmt.Printf("Warm read (10MB, cached): %v\n", warmRead)

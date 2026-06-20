@@ -5,27 +5,7 @@ import (
 	"hash/crc32"
 )
 
-/*
-summarisation
 
-wal record format is:
-length (4 bytes) | CRC32 (4bytes) | type (1 byte) | sequence (8 bytes) | data (length based) |
-
-Headers --length   -> how many bytes is the data field
-    		CRC32  -> checksum of (type + sequence + data)
-       		type   -> what kind of record is it (data, segment boundary ...)
-       --sequence -> monotonically increasing ID for ordering
-Data     -> data nai ho lol but serialised command proto
-
-why crc3?
-- disks can silently corrupt data due to bugs or bit corruption
-- ssd can return stale data after power loss
-
-why length prefix?
-- wal is append only, we read it sequentiallly during recovery
-- without length: we dont know where one record ends and next begins
-- with length: read 4 bytes -> know exactly how many bytes to read next
-*/
 
 type RecordType uint32
 
@@ -78,7 +58,7 @@ func Decode(buf []byte) (*Record, error) {
 		return nil, ErrRecordTooShort
 	}
 
-	storedCRC := binary.LittleEndian.Uint32(buf[4:8])
+	storedCRC := binary.BigEndian.Uint32(buf[4:8])
 
 	recordType := RecordType(buf[8])
 

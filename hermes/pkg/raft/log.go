@@ -5,31 +5,6 @@ import (
 	"sync"
 )
 
-/*
-RaftLog manages the Raft log
-
-The Raft log is the BACKBONE of consensus.
-Every committed entry in this log WILL be applied to EVERY state machine.
-
-Log structure:
-
-	Index:  0    1    2    3    4    5
-	        │    │    │    │    │    │
-	Entry: [nil][{term:1}][{term:1}][{term:2}][{term:2}][{term:2}]
-	            ├────────────────────┤└──────────────────────────┘
-	            COMMITTED (applied)       UNCOMMITTED (not yet majority)
-	            commitIndex=3             lastIndex=5
-
-	Snapshot: entries 0..N are replaced by a snapshot
-	After snapshot: log starts at snapshot.LastIndex+1
-
-CRITICAL INVARIANTS:
- 1. Entries are NEVER removed from committed region
- 2. log[i].Index == i (index matches position)
- 3. log[i].Term <= log[i+1].Term (terms never decrease)
- 4. If two logs agree at index I and term T,
-    they agree on all entries up to I
-*/
 type RaftLog struct {
 	mu sync.RWMutex
 

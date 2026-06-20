@@ -1,0 +1,109 @@
+# deploy/kubernetes/prometheus.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: hermes
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    
+    scrape_configs:
+    - job_name: 'hermes'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: ['hermes']
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        target_label: __address__
+        regex: (.+)
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: node_id
+    
+    # Alert rules
+    rule_files:
+    - /etc/prometheus/alerts.yml
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: hermes
+data:
+  alerts.yml: |
+    groups:
+    - name: hermes
+      rules:
+      
+      # Alert if no leader for > 30 seconds
+      - alert: HermesNoLeader
+        expr: sum(hermes_raft_is_leader) == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hermes cluster has no leader"
+          description: "No Hermes node is currently the leader. Writes are blocked."
+      
+      # Alert if leader changes too frequently
+      - alert: HermesLeaderFlapping
+        expr: rate(hermes_raft_leader_changes_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hermes leader is changing frequently"
+          description: "Leadership is unstable. Check for network issues or resource contention."
+      
+      # Alert on high WAL latency
+      - alert: HermesSlowWAL
+        expr: hermes_wal_fsync_duration_seconds_p99 > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hermes WAL fsync is slow"
+          description: "WAL fsync P99 > 100ms. Check disk performance."
+      
+      # Alert on high replication lag
+      - alert: HermesHighReplicationLag
+        expr: hermes_raft_replication_lag_entries > 1000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hermes replication lag is high"
+          description: "A follower is > 1000 entries behind. It may be struggling."
+      
+      # Alert on high request latency
+      - alert: HermesHighLatency
+        expr: hermes_request_duration_seconds_p99 > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hermes request latency is high"
+          description: "P99 latency > 500ms. Investigate."
+      
+      # Alert if cluster size drops
+      - alert: HermesClusterDegraded
+        expr: hermes_cluster_size < 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hermes cluster has fewer than 3 nodes"
+          description: "Cannot tolerate any more failures. Restore nodes immediately."

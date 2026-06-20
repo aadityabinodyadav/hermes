@@ -9,9 +9,7 @@ import (
 	"time"
 )
 
-/* ProcessInfo demonstrates what a process IS from the OS perspective
-In a distributed system, each node runs as a separate process
-This isolation is fundamental - if one node crashes, others survive */
+
 
 func ProcessInfo() {
 	fmt.Println("=== PROCESS INFORMATION ===")
@@ -42,16 +40,7 @@ func ProcessInfo() {
 	fmt.Printf("GC runs so far:                  %d\n", memStats.NumGC)
 }
 
-/* GoroutineVsOSThread demonstrates the cost difference
-This is WHY distributed systems use Go: cheap concurrency
 
-In Hermes, we'll have goroutines for:
-- Each incoming client connection (could be thousands)
-- Each peer connection (N-1 peers in cluster)
-- Raft ticker (heartbeat timer)
-- Compaction (background storage work)
-- Gossip (background membership protocol)
-- WAL fsync (background durability work)  */
 
 func GoroutineVsOSThread(count int) {
 	fmt.Printf("\n=== GOROUTINE CREATION: %d goroutines ===\n", count)
@@ -83,21 +72,12 @@ func GoroutineVsOSThread(count int) {
 	fmt.Printf("Time to create+run %d goroutines: %v\n", count, elapsed)
 	fmt.Printf("Average per goroutine:            %v\n", elapsed/time.Duration(count))
 
-	/* Key insight for distributed systems:
-	Each Hermes node can handle thousands of concurrent connections
-	because goroutines are cheap */
+	
 	fmt.Printf("\nKEY INSIGHT: We can handle %d concurrent connections\n", count)
 	fmt.Printf("using only %d actual OS threads (GOMAXPROCS)\n", runtime.GOMAXPROCS(0))
 }
 
-/*
-	ContextSwitchDemo shows what happens when goroutines share CPU
 
-This matters for Hermes because:
-- Raft ticks must happen on time (election timeouts!)
-- If our node is busy processing requests, Raft timer might starve
-- This is why Hermes will have dedicated goroutines for critical paths
-*/
 func ContextSwitchDemo() {
 	fmt.Println("\n=== CONTEXT SWITCH & SCHEDULING DEMO ===")
 	fmt.Println("Showing goroutine interleaving on CPU cores...")

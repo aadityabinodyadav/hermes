@@ -9,34 +9,7 @@ import (
 	"sync"
 )
 
-/* WAL Segment Management
 
-The WAL is split into segments (individual files).
-Each segment has a max size (e.g., 64MB).
-When a segment is full, we create a new one.
-
-WHY SEGMENTS?
-  - Easier to delete old data (just delete old segment files)
-  - Bounded recovery time (don't replay entire history, just recent segments)
-  - Parallel compaction (compact old segments while writing new ones)
-
-File naming: 000000001.wal, 000000002.wal, etc.
-The number is the FIRST sequence number in that segment.
-
-Segment lifecycle:
-  ACTIVE   → currently being written to
-  SEALED   → full, closed, being compacted or waiting for deletion
-  DELETED  → safe to delete (all entries are in SSTables)
-
-  ┌──────────────────────────────────────────────────────┐
-  │  000000001.wal │ 000000002.wal │ 000000003.wal(ACTIVE)│
-  │  [SEALED]      │ [SEALED]      │                      │
-  │  can delete    │ keep for now  │ writing here         │
-  └──────────────────────────────────────────────────────┘
-             ↑                             ↑
-       last checkpoint              current write position
-
-*/
 
 const (
 	DefaultSegmentSize = 64 * 1024 * 1024

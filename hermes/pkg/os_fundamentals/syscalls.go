@@ -8,20 +8,7 @@ import (
 	"time"
 )
 
-/* SystemCallsDemo shows the OS boundary
-Every distributed system operation eventually becomes a syscall:
 
-  network write → send() syscall
-  network read  → recv() or read() syscall
-  file write    → write() syscall
-  file flush    → fsync() syscall ← CRITICAL for durability
-  new goroutine → eventually clone() or similar
-  sleep         → nanosleep() or epoll_wait() syscall
-
-Understanding syscalls explains:
-  - WHY disk writes are slow (kernel mode switch + actual I/O)
-  - WHY fsync is expensive (must wait for disk acknowledgment)
-  - WHY network I/O can be async (epoll) but disk I/O is often sync */
 
 func SystemCallsDemo() {
 	fmt.Println("=== SYSTEM CALLS: THE OS BOUNDARY ===")
@@ -37,10 +24,7 @@ func SystemCallsDemo() {
 
 	data := []byte("Hermes WAL Entry: {term:1, index:1, command:'PUT key1 value1'}\n")
 
-	/* BUFFERED WRITE - goes to OS page cache, NOT disk yet
-	Tis is what happens by default with file.Write()
-	OS may batch many writes together for efficiency
-	RISK: If machine crashes, data in page cache is LOST */
+	
 
 	fmt.Println("1. Buffered Write (to OS page cache):")
 	start := time.Now()
@@ -57,9 +41,7 @@ func SystemCallsDemo() {
 	fmt.Printf("   Risk: Machine crash = data loss\n")
 	fmt.Println()
 
-	/* FSYNC - tells OS to flush page cache to ACTUAL disk
-	This is what a WAL MUST do before acknowledging a write
-	This is why databases are slow compared to in-memory stores */
+	
 
 	fmt.Println("2. fsync() - Force data to physical disk:")
 	start = time.Now()
@@ -82,9 +64,7 @@ func SystemCallsDemo() {
 	}
 	fmt.Println()
 
-	/* File descriptors - critical concept
-	Every connection to/from your node is a file descriptor
-	OS has limits: ulimit -n (typically 1024, should be 65536+ for servers)  */
+	
 
 	fmt.Println("4. File Descriptors:")
 	fmt.Printf("   stdin fd:  %d\n", int(os.Stdin.Fd()))

@@ -1,13 +1,6 @@
 package transport
 
-/* Real networks are UNRELIABLE. They:
-   - Drop packets (packet loss)
-   - Reorder packets
-   - Delay packets (latency variability)
-   - Duplicate packets
-   - Partition nodes (split-brain!)
-   - Introduce bit errors (corruption)
-*/
+
 
 import (
 	"context"

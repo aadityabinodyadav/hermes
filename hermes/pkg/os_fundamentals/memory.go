@@ -13,31 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-/*
-	MemoryModel demonstrates virtual memory and why it matters for distributed systems
 
-Virtual Memory Mental Model:
-
-	Process A thinks:          Process B thinks:
-	"I have addr 0x1000"       "I have addr 0x1000"
-	     │                          │
-	     │                          │
-	     ▼                          ▼
-	┌─────────────────────────────────────┐
-	│          OS Memory Manager           │
-	│        (Page Tables + MMU)           │
-	└──────────────┬──────────────┬────────┘
-	               │              │
-	               ▼              ▼
-	         Physical RAM   Physical RAM
-	         Page Frame 42  Page Frame 87
-
-Why this matters for Hermes:
-1. Memory-mapped files (mmap) for SSTable access
-2. Each node is isolated - crash doesn't corrupt others
-3. OOM killer can kill our node - we must handle this
-4. Swap thrashing can cause "slow node" that looks like partial failure
-*/
 func MemoryModel() {
 	fmt.Println("=== VIRTUAL MEMORY & MEMORY MANAGEMENT ===")
 	fmt.Println()

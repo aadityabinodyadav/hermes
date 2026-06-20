@@ -1,23 +1,9 @@
 package storage
 
-/*
- The LSM-Tree Storage Engine
- This is the COMPLETE storage engine for Hermes
 
- It orchestrates:
-   WAL → MemTable → SSTable flush → Compaction
-
- Public API (what the rest of Hermes sees):
-   Put(key, value) error
-   Get(key) (value, found, error)
-   Delete(key) error
-   Scan(start, end) (entries, error)
-   GetAtTimestamp(key, ts) (value, found, error) ← MVCC
-*/
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -144,7 +130,7 @@ func (e *Engine) putWithTimestamp(key string, value []byte, deleted bool) error 
 		return fmt.Errorf("storage: engine is closed")
 	}
 
-	cmd := encodeCommand(key, value, deleted)
+	cmd := EncodeCommand(key, value, deleted)
 
 	entry, err := e.wal.Write(cmd)
 	if err != nil {
@@ -557,7 +543,7 @@ func (e *Engine) replayWAL() error {
 	}
 
 	for _, entry := range entries {
-		key, value, deleted := decodeCommand(entry.Data)
+		key, value, deleted := DecodeCommand(entry.Data)
 		if deleted {
 			e.memTable.Delete(key, entry.Timestamp, entry.Sequence)
 		} else {
@@ -653,49 +639,7 @@ type EngineStats struct {
 	WALStats     wal.WALStats
 }
 
-func encodeCommand(key string, value []byte, deleted bool) []byte {
-	keyBytes := []byte(key)
-	size := 1 + 4 + len(keyBytes) + 4 + len(value)
-	buf := make([]byte, size)
 
-	offset := 0
-	if deleted {
-		buf[0] = 1
-	}
-	offset++
-
-	binary.LittleEndian.PutUint32(buf[offset:], uint32(len(keyBytes)))
-	offset += 4
-	copy(buf[offset:], keyBytes)
-	offset += len(keyBytes)
-
-	binary.LittleEndian.PutUint32(buf[offset:], uint32(len(value)))
-	offset += 4
-	copy(buf[offset:], value)
-
-	return buf
-}
-
-func decodeCommand(data []byte) (key string, value []byte, deleted bool) {
-	if len(data) < 5 {
-		return "", nil, false
-	}
-	deleted = data[0] == 1
-	offset := 1
-
-	keyLen := int(binary.LittleEndian.Uint32(data[offset:]))
-	offset += 4
-	key = string(data[offset : offset+keyLen])
-	offset += keyLen
-
-	valLen := int(binary.LittleEndian.Uint32(data[offset:]))
-	offset += 4
-	if valLen > 0 && offset+valLen <= len(data) {
-		value = data[offset : offset+valLen]
-	}
-
-	return
-}
 
 func init() {
 	_ = fmt.Sprintf

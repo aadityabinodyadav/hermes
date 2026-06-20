@@ -10,13 +10,7 @@ import (
 	"time"
 )
 
-/* =====================================================
-   MESSAGE HELPERS
-   TCP sends raw bytes, not messages. We solve this by
-   prefixing every message with its 4-byte length.
 
-   Wire format: [4 bytes: length][N bytes: message body]
-   ===================================================== */
 
 func writeMessage(conn net.Conn, msg string) error {
 	data := []byte(msg)
@@ -46,9 +40,7 @@ func readMessage(r *bufio.Reader) (string, error) {
 	return string(buf), nil
 }
 
-/* =====================================================
-   SERVER SIDE
-   ===================================================== */
+
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
@@ -86,14 +78,12 @@ func runServer(listener net.Listener, wg *sync.WaitGroup) {
 	handleConnection(conn)
 }
 
-/* =====================================================
-   CLIENT SIDE
-   ===================================================== */
+
 
 func runClient(addr string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	time.Sleep(50 * time.Millisecond) /* let server start first */
+	time.Sleep(50 * time.Millisecond) 
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -106,7 +96,7 @@ func runClient(addr string, wg *sync.WaitGroup) {
 
 	r := bufio.NewReader(conn)
 
-	/* Simulating Raft RPCs - what Hermes sends over the wire */
+	
 	messages := []string{
 		"AppendEntries{term:1, leaderId:node1, entries:[{index:1,cmd:'PUT k1 v1'}]}",
 		"AppendEntries{term:1, leaderId:node1, entries:[{index:2,cmd:'PUT k2 v2'}]}",
@@ -136,25 +126,13 @@ func runClient(addr string, wg *sync.WaitGroup) {
 	}
 }
 
-/* =====================================================
-   RAW TCP DEMO
-   Entry point. Starts server and client, waits for both.
 
-   Full gRPC stack for reference:
-     TCP connection  (SYN → SYN-ACK → ACK)
-       ↓
-     HTTP/2 stream  (multiplexed over TCP)
-       ↓
-     Protobuf data  (encoded in HTTP/2 DATA frames)
-
-   This demo is everything BELOW HTTP/2.
-   ===================================================== */
 
 func RawTCPDemo() {
 	fmt.Println("=== RAW TCP: WHAT GRPC IS BUILT ON ===")
 	fmt.Println()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0") /* :0 = OS picks free port */
+	listener, err := net.Listen("tcp", "127.0.0.1:0") 
 	if err != nil {
 		fmt.Printf("Listen error: %v\n", err)
 		return
@@ -174,11 +152,7 @@ func RawTCPDemo() {
 	wg.Wait()
 }
 
-/* =====================================================
-   TCP PROPERTIES
-   Things TCP does (and does NOT) guarantee.
-   Directly relevant to how Hermes/Raft behaves.
-   ===================================================== */
+
 
 func TCPProperties() {
 	fmt.Println("\n=== TCP PROPERTIES THAT MATTER FOR DISTRIBUTED SYSTEMS ===")
@@ -263,7 +237,7 @@ func demonstrateConnLatency() {
 	listener, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer listener.Close()
 
-	/* Accept loop so we don't block on the second Dial */
+	
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -276,7 +250,7 @@ func demonstrateConnLatency() {
 
 	const N = 100
 
-	/* New connection per request (bad) */
+	
 	start := time.Now()
 	for i := 0; i < N; i++ {
 		conn, _ := net.Dial("tcp", listener.Addr().String())
@@ -284,12 +258,12 @@ func demonstrateConnLatency() {
 	}
 	newConnDur := time.Since(start)
 
-	/* Reuse one connection (good) */
+	
 	conn, _ := net.Dial("tcp", listener.Addr().String())
 	start = time.Now()
 	for i := 0; i < N; i++ {
 		_ = conn
-		time.Sleep(10 * time.Microsecond) /* simulated write */
+		time.Sleep(10 * time.Microsecond) 
 	}
 	conn.Close()
 	reuseDur := time.Since(start)
@@ -300,11 +274,7 @@ func demonstrateConnLatency() {
 	fmt.Println("  LESSON: Pool connections. Hermes keeps 1 persistent conn per peer.")
 }
 
-/* =====================================================
-   NETWORK PARTITION SIMULATOR
-   Models which nodes can talk to each other.
-   This is a preview - fully built in Phase 1.4.
-   ===================================================== */
+
 
 type NetworkPartitionSimulator struct {
 	mu          sync.RWMutex
@@ -349,10 +319,7 @@ func (s *NetworkPartitionSimulator) CanCommunicate(from, to string) bool {
 	return !s.partitioned[from][to]
 }
 
-/* =====================================================
-   NETWORK CONCEPTS DEMO
-   Shows a 5-node Raft cluster surviving a partition.
-   ===================================================== */
+
 
 func NetworkConceptsDemo() {
 	fmt.Println("\n=== NETWORK PARTITION SIMULATION ===")
@@ -363,7 +330,7 @@ func NetworkConceptsDemo() {
 
 	sim := NewNetworkPartitionSimulator()
 
-	/* Partition: [node-1, node-2] cut off from [node-3, node-4, node-5] */
+	
 	minority := []string{"node-1", "node-2"}
 	majority := []string{"node-3", "node-4", "node-5"}
 
