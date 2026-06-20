@@ -1,87 +1,162 @@
-# Hermes
+# Hermes Distributed Key-Value Store
 
-Hermes is a highly-available, distributed key-value store built in Go. It uses the **Raft consensus algorithm** for distributed coordination and an **LSM-Tree** (Log-Structured Merge Tree) for the underlying storage engine.
+Hermes is a highly-available, distributed key-value store built in Go. It uses the **Raft consensus algorithm** for distributed coordination, **SWIM gossip protocol** for cluster membership, and an **LSM-Tree** (Log-Structured Merge Tree) for the underlying storage engine.
 
 ## Features
 
-- **Distributed Consensus**: Built on the Raft protocol to ensure high availability and data consistency.
+- **Distributed Consensus**: Built on the Raft protocol to ensure high availability, leader election, and data consistency across multiple nodes.
+- **SWIM Cluster Membership**: Decentralized, scalable peer discovery and failure detection via the SWIM gossip protocol.
 - **LSM-Tree Storage Engine**: Optimized for high write throughput using Write-Ahead Logging (WAL), MemTables, and SSTables.
-- **Multi-Protocol Support**: Exposes APIs via **gRPC** (for internal/fast communication) and **HTTP/JSON** (for easy integration).
-- **Interactive CLI**: Includes `hermes-cli` with both a command mode and an interactive REPL shell.
+- **Multi-Protocol Support**: Exposes internal APIs via **gRPC** and user-facing APIs via both **gRPC** and **HTTP/JSON**.
+- **Interactive CLI**: Includes `hermes-cli` with both a command-line mode and an interactive REPL shell.
 
-## Getting Started
+---
 
-### 1. Start the Hermes Server
-You can start a single-node Hermes cluster by running the `hermes-server` command. By default, it runs gRPC on port `:7001` and the HTTP API on port `:7000`.
+## 🚀 Running a Multi-Node Cluster
 
-```bash
+To experience the distributed nature of Hermes, you can run a local 3-node cluster. Each node requires its own ports and data directory, which are configured via environment variables.
+
+### 1. Start Node 0 (The Seed Node)
+Open your first terminal and start the initial node. This node acts as the seed node for others to join.
+```powershell
+$env:HERMES_NODE_ID="hermes-0"
+$env:HERMES_LISTEN_ADDR="127.0.0.1:7001"
+$env:HERMES_HTTP_ADDR="127.0.0.1:7000"
+$env:HERMES_METRICS_ADDR="127.0.0.1:9000"
+$env:HERMES_DATA_DIR="/tmp/hermes-0"
+$env:HERMES_SEED_NODES=""
 go run ./cmd/hermes-server server
 ```
 
-*(Note: Data is persisted in the `\data` directory by default.)*
-
-### 2. Using the Hermes CLI
-
-The `hermes-cli` is the easiest way to interact with your Hermes cluster. 
-
-#### Command Mode
-
-You can run individual commands directly from your terminal:
-
-- **Put a value**:
-  ```bash
-  go run ./cmd/hermes-cli put user:alice 1000
-  ```
-
-- **Get a value**:
-  ```bash
-  go run ./cmd/hermes-cli get user:alice
-  ```
-
-- **Delete a value**:
-  ```bash
-  go run ./cmd/hermes-cli delete user:alice
-  ```
-
-- **Scan by prefix**:
-  ```bash
-  go run ./cmd/hermes-cli scan user:
-  ```
-
-- **Check cluster status**:
-  ```bash
-  go run ./cmd/hermes-cli cluster status
-  ```
-
-#### Interactive REPL Mode
-
-If you run the CLI without any arguments, it drops you into an interactive REPL mode where you can execute commands consecutively:
-
-```bash
-$ go run ./cmd/hermes-cli
-hermes> put user:bob 500
-OK
-hermes> get user:bob
-500
-hermes> scan user:
-user:bob = 500
-hermes> cluster status
-Leader: hermes-0 (you)
-Nodes:  1/1 alive
-Shards: 2
-hermes> exit
+### 2. Start Node 1
+Open a second terminal and start Node 1, pointing it to Node 0 to join the cluster.
+```powershell
+$env:HERMES_NODE_ID="hermes-1"
+$env:HERMES_LISTEN_ADDR="127.0.0.1:7011"
+$env:HERMES_HTTP_ADDR="127.0.0.1:7010"
+$env:HERMES_METRICS_ADDR="127.0.0.1:9010"
+$env:HERMES_DATA_DIR="/tmp/hermes-1"
+$env:HERMES_SEED_NODES="127.0.0.1:7001"
+go run ./cmd/hermes-server server
 ```
 
-### 3. Using the HTTP API
+### 3. Start Node 2
+Open a third terminal and start Node 2, also pointing it to Node 0.
+```powershell
+$env:HERMES_NODE_ID="hermes-2"
+$env:HERMES_LISTEN_ADDR="127.0.0.1:7021"
+$env:HERMES_HTTP_ADDR="127.0.0.1:7020"
+$env:HERMES_METRICS_ADDR="127.0.0.1:9020"
+$env:HERMES_DATA_DIR="/tmp/hermes-2"
+$env:HERMES_SEED_NODES="127.0.0.1:7001"
+go run ./cmd/hermes-server server
+```
 
-You can also interact with the Hermes cluster programmatically using the HTTP API:
+*Note: You can easily automate this by running the provided `start_cluster.ps1` script.*
 
-- **Put a value**:
-  ```bash
-  curl -X POST http://localhost:7000/put -d '{"key":"user:alice","value":"1000"}'
+---
+
+## 🛠️ Interacting with the Cluster
+
+You can interact with any node in the cluster. Changes sent to the Raft leader will be replicated across the cluster.
+
+### Using the Hermes CLI
+
+The `hermes-cli` provides an interactive shell (REPL) and standard command-line execution. By default, the CLI connects to `127.0.0.1:7001`. To connect to a different node, set `$env:HERMES_ADDR="127.0.0.1:7011"`.
+
+#### Interactive REPL Mode
+```powershell
+go run ./cmd/hermes-cli
+```
+Once inside the REPL (`hermes> `), you can run:
+
+- **Check Cluster Status:**
+  ```text
+  hermes> cluster status
+  Leader: hermes-0
+  Nodes:  3/3 alive
+  Shards: 3
+  ```
+- **Insert a Key:**
+  ```text
+  hermes> put user:alice 1000
+  OK
+  ```
+- **Retrieve a Key:**
+  ```text
+  hermes> get user:alice
+  1000
+  ```
+- **Delete a Key:**
+  ```text
+  hermes> delete user:alice
+  OK
+  ```
+- **Scan by Prefix:**
+  ```text
+  hermes> scan user:
+  user:alice = 1000
   ```
 
-- **Get a value**:
-  ```bash
-  curl http://localhost:7000/get?key=user:alice
+#### Single-Command Mode
+Execute operations directly from your shell:
+```powershell
+go run ./cmd/hermes-cli put mykey myvalue
+go run ./cmd/hermes-cli get mykey
+go run ./cmd/hermes-cli delete mykey
+go run ./cmd/hermes-cli scan my
+go run ./cmd/hermes-cli cluster status
+```
+
+---
+
+### Using the HTTP API
+
+Hermes exposes a REST-like API using JSON over HTTP. You can point your HTTP requests to any node's `$env:HERMES_HTTP_ADDR` (e.g., `127.0.0.1:7000`).
+
+- **Put a value:**
+  ```powershell
+  curl -X POST http://127.0.0.1:7000/put -d '{"key":"user:alice","value":"1000"}'
   ```
+
+- **Get a value:**
+  ```powershell
+  curl http://127.0.0.1:7000/get?key=user:alice
+  ```
+
+- **Delete a value:**
+  ```powershell
+  curl -X POST http://127.0.0.1:7000/delete -d '{"key":"user:alice"}'
+  ```
+
+- **Cluster Status:**
+  ```powershell
+  curl http://127.0.0.1:7000/cluster/status
+  ```
+
+---
+
+## 📊 Observability
+
+
+Hermes exposes Prometheus metrics on the address specified by `$env:HERMES_METRICS_ADDR`.
+
+- **View raw metrics:**
+  ```powershell
+  curl http://127.0.0.1:9000/metrics
+  ```
+- **Grafana Dashboards:**
+  A predefined Grafana dashboard is available in `deploy/kubernetes/grafana-dashboard.json`. Import this into Grafana to visualize Raft leader changes, replication lag, and LSM-tree compaction stats.
+
+
+┌─────────────┐     gRPC      ┌─────────────────────────────┐
+│  CLI / HTTP │ ────────────▶ │         Hermes Node          │
+└─────────────┘               │  ┌──────────┐ ┌──────────┐  │
+                               │  │  Raft    │ │  LSM     │  │
+                               │  │ Consensus│ │  Tree    │  │
+                               │  └──────────┘ └──────────┘  │
+                               └─────────────────────────────┘
+                                        │ gossip (SWIM)
+                               ┌────────┴────────┐
+                               │   Peer Nodes    │
+                               └─────────────────┘
