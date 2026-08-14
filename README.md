@@ -272,6 +272,3 @@ The following were written as first-principles design notes during implementatio
 - [`pkg/storage/storage.md`](pkg/storage/storage.md) — LSM-tree write/read paths, level structure, compaction.
 - [`pkg/partition/readme.md`](pkg/partition/readme.md) — partitioning strategy comparison, consistent hashing math, shard splitting.
 
-## License
-
-Add a license before treating this as a public reference implementation — none is currently declared.
