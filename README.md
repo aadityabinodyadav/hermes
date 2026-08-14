@@ -1,6 +1,154 @@
-# Hermes Architecture
+# Hermes
 
-This document describes what actually runs when a Hermes node starts, how a request moves through the system, and where the honest edges of the implementation are. It is written for a reader evaluating engineering judgment, not for a first introduction to distributed systems — for that, see the per-package design notes linked at the bottom.
+A distributed, replicated key-value store written in Go, implementing Raft consensus, an LSM-tree storage engine, SWIM-based cluster membership, and range partitioning across multiple Raft groups.
+
+Hermes was built to answer one question honestly: *if I implement the core algorithms behind etcd, CockroachDB, and TiKV from scratch — not a library wrapper — do they actually hold up under node failure, network partition, and concurrent writes?* The integration suite in `test/integration/` is the evidence: cluster formation, leader failover, network partition recovery, linearizability under concurrent load, and durability across restarts are all tested against a real multi-node cluster, not mocked.
+
+**Contents**
+- [Part 1 — Overview, quickstart, limitations](#part-1--overview)
+  - [What's actually here](#whats-actually-here)
+  - [Quickstart](#quickstart)
+  - [Observability](#observability)
+  - [Known limitations](#known-limitations)
+  - [Roadmap](#roadmap)
+- [Part 2 — Architecture](#part-2--architecture)
+  - [System shape](#1-system-shape)
+  - [Node startup sequence](#2-node-startup-sequence-pkgservernodego-start)
+  - [Write path](#3-write-path-put-keyvalue)
+  - [Storage engine](#4-storage-engine-pkgstorage)
+  - [Partitioning](#5-partitioning-pkgpartition)
+  - [Membership and failure detection](#6-membership-and-failure-detection-pkgmembership)
+  - [Consistency guarantees actually provided today](#7-consistency-guarantees-actually-provided-today)
+  - [Chaos and verification tooling](#8-what-chaos-and-verification-tooling-actually-does-pkgchaos)
+  - [Explicitly not wired in yet](#9-explicitly-not-wired-in-yet-and-why-thats-stated-not-hidden)
+  - [Further reading](#10-further-reading)
+
+---
+
+# Part 1 — Overview
+
+## What's actually here
+
+**Wired into the running server** (`pkg/server/node.go` starts all of these on every node):
+
+| Subsystem | Package | Implements |
+|---|---|---|
+| Consensus | `pkg/raft` | Leader election, log replication, safety (Raft) |
+| Membership | `pkg/membership` | SWIM gossip, phi-accrual failure detection |
+| Storage | `pkg/storage` (+`wal`, `memtable`, `sstable`, `bloom`) | WAL → memtable → SSTable LSM pipeline, MVCC GC |
+| Partitioning | `pkg/partition` | Range partitioning, consistent hashing, shard routing, rebalancer |
+| Consistency | `pkg/consistency` | Leader leases, ReadIndex linearizable reads, distributed locks with fencing |
+| Transport | `pkg/transport` | gRPC client/server, connection pooling, mTLS config (see limitations) |
+| Reliability | `pkg/ratelimit` | Token-bucket rate limiting, circuit breaker |
+| Observability | `pkg/observability` | Structured logging, Prometheus metrics, OpenTelemetry-style tracing, health checks |
+
+**Implemented as standalone protocol modules, not yet wired into the live request path** — these run via their own CLI demo commands (see below) and have their own tests, but a client `PUT` today does not route through them:
+
+| Subsystem | Package | Implements |
+|---|---|---|
+| Transactions | `pkg/txn` | 2PC, Percolator, Saga, Serializable Snapshot Isolation, timestamp oracle |
+| CRDTs / snapshots | `pkg/consistency/crdt.go`, `pkg/chaos/snapshot.go` | Conflict-free replicated types, Chandy-Lamport global snapshots |
+| Change data capture | `pkg/cdc` | WAL-tailing changefeed |
+| Multi-region | `pkg/multiregion` | Geo-distributed topology |
+| Query planning | `pkg/query` | Distributed query plan operator push-down |
+| Chaos / verification | `pkg/chaos` | Fault injection, Jepsen-style linearizability checker, FoundationDB-style deterministic simulator |
+
+This split is deliberate and stated up front rather than left for a reader to discover — see [Known Limitations](#known-limitations).
+
+---
+
+## Quickstart
+
+### Run a 3-node cluster locally
+
+```bash
+# Terminal 1 — seed node
+HERMES_NODE_ID=hermes-0 HERMES_LISTEN_ADDR=127.0.0.1:7001 \
+HERMES_HTTP_ADDR=127.0.0.1:7000 HERMES_METRICS_ADDR=127.0.0.1:9000 \
+HERMES_DATA_DIR=/tmp/hermes-0 HERMES_SEED_NODES="" \
+go run ./cmd/hermes-server server
+
+# Terminal 2
+HERMES_NODE_ID=hermes-1 HERMES_LISTEN_ADDR=127.0.0.1:7011 \
+HERMES_HTTP_ADDR=127.0.0.1:7010 HERMES_METRICS_ADDR=127.0.0.1:9010 \
+HERMES_DATA_DIR=/tmp/hermes-1 HERMES_SEED_NODES=127.0.0.1:7001 \
+go run ./cmd/hermes-server server
+
+# Terminal 3
+HERMES_NODE_ID=hermes-2 HERMES_LISTEN_ADDR=127.0.0.1:7021 \
+HERMES_HTTP_ADDR=127.0.0.1:7020 HERMES_METRICS_ADDR=127.0.0.1:9020 \
+HERMES_DATA_DIR=/tmp/hermes-2 HERMES_SEED_NODES=127.0.0.1:7001 \
+go run ./cmd/hermes-server server
+```
+
+Or run `start_cluster.ps1` / `start_cluster.bat` to automate the above. A Kubernetes manifest set (StatefulSet, Services, Prometheus, Grafana) is in `deploy/kubernetes/`.
+
+### Talk to it
+
+```bash
+go run ./cmd/hermes-cli put user:alice 1000
+go run ./cmd/hermes-cli get user:alice
+go run ./cmd/hermes-cli cluster status
+```
+
+or over HTTP:
+
+```bash
+curl -X POST http://127.0.0.1:7000/put -d '{"key":"user:alice","value":"1000"}'
+curl "http://127.0.0.1:7000/get?key=user:alice"
+```
+
+### Run the test suite
+
+```bash
+go test ./...                                    # unit tests
+go test ./test/integration/... -run TestCluster   # multi-node integration tests
+go test -race ./...                              # with the race detector — always develop with this on
+```
+
+### Explore individual subsystems in isolation
+
+Every core algorithm also runs as a standalone, narrated demo — useful for verifying one subsystem in isolation without standing up a cluster:
+
+```bash
+go run ./cmd/hermes-server raft          # leader election + log replication walkthrough
+go run ./cmd/hermes-server storage       # WAL → memtable → SSTable → compaction
+go run ./cmd/hermes-server partition     # consistent hashing + range partitioning
+go run ./cmd/hermes-server txn           # 2PC / Percolator / Saga / SSI
+go run ./cmd/hermes-server chaos         # fault injection + Jepsen-style checking
+go run ./cmd/hermes-server all-demos     # run all of the above in sequence
+```
+
+---
+
+## Observability
+
+Prometheus metrics are exposed on `HERMES_METRICS_ADDR` (`curl http://127.0.0.1:9000/metrics`). A Grafana dashboard covering leader changes, replication lag, and LSM compaction stats is in `deploy/kubernetes/grafana-dashboard.json`.
+
+---
+
+## Known limitations
+
+Stated directly rather than left for a code reviewer to find:
+
+- **mTLS is configured but not enforced.** `pkg/transport/tls.go` loads and validates certificates, but `startGRPC()` currently discards the resulting credentials instead of passing them into `grpc.NewServer()`. The gRPC server runs in plaintext today. This is the single highest-priority item before any "production-ready" claim.
+- **The transaction layer is not in the write path.** 2PC, Percolator, and SSI are implemented and unit-tested, but a client `PUT`/`GET` today goes through Raft + the LSM engine directly — it does not go through `pkg/txn`. Multi-key transactional writes are not currently possible via the client API.
+- **Shard splitting is implemented but not triggered automatically.** `pkg/partition/rebalancer.go` contains the split/merge/move logic; nothing currently monitors shard load and calls it.
+- **Single-region only in practice.** `pkg/multiregion` models geo-distributed topology but isn't consulted by the router.
+
+## Roadmap
+
+1. Wire TLS credentials into the gRPC server (correctness/security, should be first).
+2. Route multi-key writes through `pkg/txn` (Percolator, since it's the modern/Spanner-style approach already implemented) instead of leaving it standalone.
+3. Trigger the rebalancer from real shard-load metrics instead of running it only via its demo command.
+4. Wire `pkg/cdc` into the WAL so changefeeds are consumable externally.
+
+---
+---
+
+# Part 2 — Architecture
+
+This part describes what actually runs when a Hermes node starts, how a request moves through the system, and where the honest edges of the implementation are. It's written for a reader evaluating engineering judgment, not for a first introduction to distributed systems — for that, see [Further reading](#10-further-reading) at the end.
 
 ## 1. System shape
 
@@ -81,7 +229,7 @@ Read path: memtable → bloom filter per SSTable level → SSTable index (binary
 
 Hermes uses **range partitioning** as the primary strategy (shard 0 owns `["", "m")`, shard 1 owns `["m", "z")`, etc.) — the same choice CockroachDB, TiKV, and Spanner make, because it keeps range scans efficient (contiguous keys stay on one shard), at the cost of needing a deliberate split-key strategy to avoid hot shards. `pkg/partition/consistent_hash.go` also implements consistent hashing with virtual nodes, used internally for node-to-vnode assignment rather than as the primary keyspace partitioning strategy.
 
-`pkg/partition/rebalancer.go` implements shard splitting: pick a split key, create a new Raft group, snapshot-transfer the affected range, atomically update the shard map, redirect traffic. **This is implemented but not currently triggered by anything** — see Known Limitations in the top-level README. It only runs today via its own demo path.
+`pkg/partition/rebalancer.go` implements shard splitting: pick a split key, create a new Raft group, snapshot-transfer the affected range, atomically update the shard map, redirect traffic. **This is implemented but not currently triggered by anything** — see [Known Limitations](#known-limitations). It only runs today via its own demo path.
 
 ## 6. Membership and failure detection (`pkg/membership`)
 
@@ -120,6 +268,10 @@ Listing these here rather than only in code comments is intentional — a reader
 
 The following were written as first-principles design notes during implementation and are accurate but tutorial-voiced rather than reference-voiced — read this document first, then these for the "why" behind each algorithm choice:
 
-- [`pkg/raft/readme.md`](../pkg/raft/readme.md) — Raft: leader election, log replication, the log matching property, why Raft over Paxos.
-- [`pkg/storage/storage.md`](../pkg/storage/storage.md) — LSM-tree write/read paths, level structure, compaction.
-- [`pkg/partition/readme.md`](../pkg/partition/readme.md) — partitioning strategy comparison, consistent hashing math, shard splitting.
+- [`pkg/raft/readme.md`](pkg/raft/readme.md) — Raft: leader election, log replication, the log matching property, why Raft over Paxos.
+- [`pkg/storage/storage.md`](pkg/storage/storage.md) — LSM-tree write/read paths, level structure, compaction.
+- [`pkg/partition/readme.md`](pkg/partition/readme.md) — partitioning strategy comparison, consistent hashing math, shard splitting.
+
+## License
+
+Add a license before treating this as a public reference implementation — none is currently declared.
